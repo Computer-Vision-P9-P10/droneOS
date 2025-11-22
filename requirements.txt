@@ -1,0 +1,5 @@
+requests
+fastapi
+opencv-python
+ultralytics
+httpx[http2]
