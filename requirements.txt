@@ -3,3 +3,4 @@ fastapi
 opencv-python
 ultralytics
 httpx[http2]
+filterpy
