@@ -66,7 +66,7 @@ while True:
 
     frame = zoom_controller.update_zoom(frame, person_boxes)
 
-    results = model(frame, conf=confidence, iou=iou, imgsz=640, verbose=False)
+    results = model.predict(frame, conf=confidence, iou=iou, imgsz=640, verbose=False)
 
     frame_count += 1
     processed_frames += 1
