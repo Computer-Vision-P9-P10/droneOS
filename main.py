@@ -21,7 +21,7 @@ if USE_SORT_TRACKER:
 else:
     from centroid_tracker import track_and_update_persons, boxes_overlap, get_centroid
 
-model = YOLO(config.MODEL_PATH).to(config.DEVICE)
+model = YOLO(config.MODEL_PATH)
 cap = cv2.VideoCapture(config.VIDEO_PATH)
 if not cap.isOpened():
     print("Error: Could not open video file.")
@@ -65,8 +65,14 @@ while True:
         frame = apply_filters(frame)
 
     frame = zoom_controller.update_zoom(frame, person_boxes)
+    
+    if (config.DEVICE == "cpu"):
+        results = model.predict(frame, conf=confidence, iou=iou, imgsz=640, verbose=False)
+    elif (config.DEVICE == "cuda" or config.DEVICE == "gpu"):
+        results = model.predict(frame, conf=confidence, iou=iou, imgsz=640, verbose=False, device=0)
+    else:
+        print("Please enter a supported device.")
 
-    results = model.predict(frame, conf=confidence, iou=iou, imgsz=640, verbose=False)
 
     frame_count += 1
     processed_frames += 1
