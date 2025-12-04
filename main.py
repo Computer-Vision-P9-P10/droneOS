@@ -21,7 +21,7 @@ if USE_SORT_TRACKER:
 else:
     from centroid_tracker import track_and_update_persons, boxes_overlap, get_centroid
 
-model = YOLO(config.MODEL_PATH)
+model = YOLO(config.MODEL_PATH).to(config.DEVICE)
 cap = cv2.VideoCapture(config.VIDEO_PATH)
 if not cap.isOpened():
     print("Error: Could not open video file.")
@@ -35,6 +35,7 @@ helmet_conf = config.HELMET_CONF
 boots_conf = config.BOOTS_CONF
 gloves_conf = config.GLOVES_CONF
 confidence = config.CONFIDENCE
+iou = config.IOU
 frame_interval = config.FRAME_INTERVAL
 
 zoom_controller = ZoomController(
@@ -65,15 +66,18 @@ while True:
 
     frame = zoom_controller.update_zoom(frame, person_boxes)
 
-    results = model(frame, conf=confidence, iou=0.3, imgsz=640, verbose=False)
+    results = model(frame, conf=confidence, iou=iou, imgsz=640, verbose=False)
 
     frame_count += 1
     processed_frames += 1
 
+    boxes = []
+    filtered_boxes = []
+    class_names = model.names if hasattr(model, "names") else {}
+
     if frame_count % frame_interval == 0:
         boxes = results[0].boxes.data.cpu().numpy()
         filtered_boxes = []
-        class_names = model.names if hasattr(model, "names") else {}
         for box in boxes:
             class_id = int(box[5])
             conf = box[4]
@@ -117,11 +121,27 @@ while True:
 
         on_person_detected_count = trigger_on_person_detected(person_history, cap, on_person_detected_count, backend_host)
 
-    if config.CONSOLE_OUTPUT and frame_count % 30 == 0:
-        fps = processed_frames / (time.time() - start_time) if (time.time() - start_time) > 0 else 0.0
-        detected = len(filtered_boxes)
-        detected_names = [model.names.get(int(box[5]), str(int(box[5]))) for box in filtered_boxes]
-        print(f"[Frame {frame_count}] FPS: {fps:.1f} - Detected: {detected} ({', '.join(detected_names)})")
+    # Always draw boxes and show video, regardless of console output
+    for box in filtered_boxes:
+        x1, y1, x2, y2 = map(int, box[:4])
+        conf = box[4]
+        class_id = int(box[5])
+        label = model.names.get(class_id, str(class_id)) if hasattr(model, "names") else str(class_id)
+        color = (0, 255, 0) if label.lower() == "person" else (255, 0, 0)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(
+            frame,
+            f"{label} {conf:.2f}",
+            (x1, y1 - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2
+        )
+
+    cv2.imshow("Video", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
 cap.release()
 cv2.destroyAllWindows()

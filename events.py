@@ -1,8 +1,11 @@
 import asyncio
 import httpx
 import cv2
+import config
 
-async def violation_detected(backend_host: str, violation: str):
+backend_host = config.BACKEND_HOST
+
+async def violation_detected(violation: str):
     message = f"Missing {violation} detected!"
     url = f"{backend_host}/violation"
     data = {"message": message, "timestamp": ""}
