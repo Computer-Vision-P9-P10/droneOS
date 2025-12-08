@@ -6,7 +6,7 @@ BACKEND_HOST = "0.0.0.0"
 
 USE_SORT_TRACKER = False
 FILTERS_ON = False
-CONSOLE_OUTPUT = False
+CONSOLE_OUTPUT = True
 DEVICE = "cuda"  # "cuda" or "cpu"
 
 PERSON_CONF = 0.4
