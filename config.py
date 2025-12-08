@@ -1,12 +1,13 @@
 MODEL_PATH = "yolo12m.pt"
+# VIDEO_PATH = 0
 VIDEO_PATH = "./videos/DJI_0017.MP4"
 # VIDEO_PATH = "./videos/amar/DJI_0013.MP4"
 BACKEND_HOST = "0.0.0.0"
 
 USE_SORT_TRACKER = False
 FILTERS_ON = False
-CONSOLE_OUTPUT = True
-DEVICE = "cpu"  # "cuda" or "cpu"
+CONSOLE_OUTPUT = False
+DEVICE = "cuda"  # "cuda" or "cpu"
 
 PERSON_CONF = 0.4
 VEST_CONF = 0.4
@@ -17,6 +18,9 @@ GLOVES_CONF = 0.1
 CONFIDENCE = 0.1
 IOU = 0.6
 FRAME_INTERVAL = 1
+
+DOWNSCALE = True
+DOWNSCALE_SIZE = 640
 
 
 # Zoom config

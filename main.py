@@ -7,7 +7,7 @@ import time
 from zoom_controller import ZoomController
 from events import trigger_on_person_detected
 import config
-from filters import apply_filters
+from filters import apply_filters, preprocess_frame
 from box_utils import define_boxes, person_boxes, vest_boxes, helmet_boxes, boots_boxes, gloves_boxes
 
 start_time = time.time()
@@ -37,6 +37,7 @@ gloves_conf = config.GLOVES_CONF
 confidence = config.CONFIDENCE
 iou = config.IOU
 frame_interval = config.FRAME_INTERVAL
+downscale_on = config.DOWNSCALE
 
 zoom_controller = ZoomController(
     zoom_enabled=config.ZOOM_ENABLED,
@@ -60,6 +61,8 @@ while True:
     ret, frame = cap.read()
     if not ret:
         break
+    if downscale_on:
+        frame = preprocess_frame(frame)
 
     if config.FILTERS_ON:
         frame = apply_filters(frame)
@@ -145,14 +148,21 @@ while True:
             2
         )
 
-    cv2.imshow("Video", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    if config.CONSOLE_OUTPUT and frame_count % 30 == 0:
+        fps = processed_frames / (time.time() - start_time) if (time.time() - start_time) > 0 else 0.0
+        detected = len(filtered_boxes)
+        detected_names = [model.names.get(int(box[5]), str(int(box[5]))) for box in filtered_boxes]
+        print(f"[Frame {frame_count}] FPS: {fps:.1f} - Detected: {detected} ({', '.join(detected_names)})")
+
+    if not config.CONSOLE_OUTPUT:
+        cv2.imshow("Video", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 cap.release()
 cv2.destroyAllWindows()
 
-elapsed = time.time() - zoom_controller.last_zoom_change
+elapsed = time.time() - start_time
 real_fps = processed_frames / elapsed if elapsed > 0 else 0.0
 
 print("\n\n" + "=" * 20 + " Results " + "=" * 20)
