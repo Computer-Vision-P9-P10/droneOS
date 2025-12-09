@@ -1,4 +1,4 @@
-MODEL_PATH = "yolo12m.pt"
+MODEL_PATH = "yolo12m.engine"
 # VIDEO_PATH = 0
 VIDEO_PATH = "./videos/DJI_0017.MP4"
 # VIDEO_PATH = "./videos/amar/DJI_0013.MP4"
