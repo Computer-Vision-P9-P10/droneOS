@@ -4,23 +4,24 @@ from ultralytics import YOLO
 import numpy as np
 import time
 
-# from centroid_tracker import track_and_update_persons, boxes_overlap, get_centroid
 from zoom_controller import ZoomController
 from events import trigger_on_person_detected
 import config
-from box_utils import (
-    define_boxes,
-    person_boxes,
-    vest_boxes,
-    helmet_boxes,
-    boots_boxes,
-    gloves_boxes,
-)
+from filters import apply_filters, preprocess_frame
+from box_utils import define_boxes, person_boxes, vest_boxes, helmet_boxes, boots_boxes, gloves_boxes
 
 start_time = time.time()
 
+# Choose your tracker import here
+USE_SORT_TRACKER = config.USE_SORT_TRACKER
+sort_tracker = None
+if USE_SORT_TRACKER:
+    from sort_tracker import SortTracker, sort_track_and_update_persons, boxes_overlap, get_centroid
+    sort_tracker = SortTracker(max_age=30, min_hits=3, iou_threshold=0.3)
+else:
+    from centroid_tracker import track_and_update_persons, boxes_overlap, get_centroid
 
-model = YOLO(config.MODEL_PATH, task="detect")
+model = YOLO(config.MODEL_PATH, task='detect')
 cap = cv2.VideoCapture(config.VIDEO_PATH)
 if not cap.isOpened():
     print("Error: Could not open video file.")
@@ -62,28 +63,21 @@ while True:
     t1 = time.time()
     if not ret:
         break
+    if downscale_on:
+        frame = preprocess_frame(frame)
+    t2 = time.time()
 
-    # TODO: add preprocessing?
-    # if downscale_on:
-    #     frame = preprocess_frame(frame)
-    # t2 = time.time()
-    #
-    # if config.FILTERS_ON:
-    #     frame = apply_filters(frame)
-    # t3 = time.time()
+    if config.FILTERS_ON:
+        frame = apply_filters(frame)
+    t3 = time.time()
 
-    # TODO: improve zoom logic? currently very primitive
     frame = zoom_controller.update_zoom(frame, person_boxes)
     t4 = time.time()
-
-    if config.DEVICE == "cpu":
-        results = model.predict(
-            frame, conf=confidence, iou=iou, imgsz=640, verbose=False
-        )
-    elif config.DEVICE == "cuda" or config.DEVICE == "gpu":
-        results = model.predict(
-            frame, conf=confidence, iou=iou, imgsz=640, verbose=False, device=0
-        )
+    
+    if (config.DEVICE == "cpu"):
+        results = model.predict(frame, conf=confidence, iou=iou, imgsz=640, verbose=False)
+    elif (config.DEVICE == "cuda" or config.DEVICE == "gpu"):
+        results = model.predict(frame, conf=confidence, iou=iou, imgsz=640, verbose=False, device=0)
     else:
         print("Please enter a supported device.")
     t5 = time.time()
@@ -127,20 +121,19 @@ while True:
             if len(person_boxes) == 0:
                 zoom_controller.disable_zoom()
 
-        # TODO: change this to one actually useful for when there's several of the same object
-        # next_person_id = track_and_update_persons(
-        #     person_boxes,
-        #     vest_boxes,
-        #     helmet_boxes,
-        #     boots_boxes,
-        #     gloves_boxes,
-        #     person_history,
-        #     next_person_id,
-        # )
+        if USE_SORT_TRACKER:
+            sort_tracker, person_history = sort_track_and_update_persons(
+                person_boxes, vest_boxes, helmet_boxes, boots_boxes, gloves_boxes,
+                person_history, sort_tracker
+            )
+            next_person_id = max(person_history.keys(), default=-1) + 1 if person_history else 0
+        else:
+            next_person_id = track_and_update_persons(
+                person_boxes, vest_boxes, helmet_boxes, boots_boxes, gloves_boxes,
+                person_history, next_person_id
+            )
 
-        on_person_detected_count = trigger_on_person_detected(
-            person_history, cap, on_person_detected_count, backend_host
-        )
+        on_person_detected_count = trigger_on_person_detected(person_history, cap, on_person_detected_count, backend_host)
 
     # Always draw boxes and show video, regardless of console output
     if config.CONSOLE_OUTPUT is False:
@@ -148,11 +141,7 @@ while True:
             x1, y1, x2, y2 = map(int, box[:4])
             conf = box[4]
             class_id = int(box[5])
-            label = (
-                model.names.get(class_id, str(class_id))
-                if hasattr(model, "names")
-                else str(class_id)
-            )
+            label = model.names.get(class_id, str(class_id)) if hasattr(model, "names") else str(class_id)
             color = (0, 255, 0) if label.lower() == "person" else (255, 0, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(
@@ -162,30 +151,20 @@ while True:
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 color,
-                2,
+                2
             )
     t6 = time.time()
 
     if config.CONSOLE_OUTPUT and frame_count % 30 == 0:
-        fps = (
-            processed_frames / (time.time() - start_time)
-            if (time.time() - start_time) > 0
-            else 0.0
-        )
+        fps = processed_frames / (time.time() - start_time) if (time.time() - start_time) > 0 else 0.0
         detected = len(filtered_boxes)
-        detected_names = [
-            model.names.get(int(box[5]), str(int(box[5]))) for box in filtered_boxes
-        ]
-        print(
-            f"[Frame {frame_count}] FPS: {fps:.1f} - Detected: {detected} ({', '.join(detected_names)})"
-        )
-        print(
-            f"Timing (ms): read={1000 * (t1 - t0):.1f}, preprocess={1000 * (t2 - t1):.1f}, filter={1000 * (t3 - t2):.1f}, zoom={1000 * (t4 - t3):.1f}, inference={1000 * (t5 - t4):.1f}, draw={1000 * (t6 - t5):.1f}"
-        )
+        detected_names = [model.names.get(int(box[5]), str(int(box[5]))) for box in filtered_boxes]
+        print(f"[Frame {frame_count}] FPS: {fps:.1f} - Detected: {detected} ({', '.join(detected_names)})")
+        print(f"Timing (ms): read={1000*(t1-t0):.1f}, preprocess={1000*(t2-t1):.1f}, filter={1000*(t3-t2):.1f}, zoom={1000*(t4-t3):.1f}, inference={1000*(t5-t4):.1f}, draw={1000*(t6-t5):.1f}")
 
     if not config.CONSOLE_OUTPUT:
         cv2.imshow("Video", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
 cap.release()

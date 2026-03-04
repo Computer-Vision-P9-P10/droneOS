@@ -5,6 +5,10 @@ import config
 
 backend_host = config.BACKEND_HOST
 
+# TODO:
+# - Update endpoints to actual cases
+
+
 async def violation_detected(violation: str):
     message = f"Missing {violation} detected!"
     url = f"{backend_host}/violation"
@@ -19,10 +23,14 @@ async def violation_detected(violation: str):
         except Exception as e:
             print(f"Failed to send API request: {e}")
 
+
 async def on_person_detected():
     print("Person detected! Executing action...")
 
-def trigger_on_person_detected(person_history, cap, on_person_detected_count, backend_host):
+
+def trigger_on_person_detected(
+    person_history, cap, on_person_detected_count, backend_host
+):
     for pid, hist in person_history.items():
         if cap.get(cv2.CAP_PROP_FPS) > 0:
             time_in_frame = hist["frames"] / cap.get(cv2.CAP_PROP_FPS)
