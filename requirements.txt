@@ -4,3 +4,4 @@ opencv-python
 ultralytics
 httpx[http2]
 filterpy
+paho-mqtt
