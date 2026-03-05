@@ -1,16 +1,16 @@
-MODEL_PATH = "yolo12m.engine"
+MODEL_PATH = "yolo26s.pt"
 # VIDEO_PATH = 0
 VIDEO_PATH = "./videos/DJI_0017.MP4"
 # VIDEO_PATH = "./videos/amar/DJI_0013.MP4"
 BACKEND_HOST = "0.0.0.0"
 
 FILTERS_ON = False
-CONSOLE_OUTPUT = True
-DEVICE = "cuda"  # "cuda" or "cpu"
+CONSOLE_OUTPUT = False 
+DEVICE = "cpu"  # "cuda" or "cpu"
 
 PERSON_CONF = 0.4
-VEST_CONF = 0.4
-HELMET_CONF = 0.2
+VEST_CONF = 0.1
+HELMET_CONF = 0.1
 BOOTS_CONF = 0.1
 GLOVES_CONF = 0.1
 

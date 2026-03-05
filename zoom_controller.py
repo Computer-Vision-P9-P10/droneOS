@@ -91,3 +91,5 @@ class ZoomController:
     def disable_zoom(self):
         self.zoomed_in = False
         self.zoom_only_person_frames = 0
+
+    

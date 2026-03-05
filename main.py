@@ -36,7 +36,7 @@ gloves_conf = config.GLOVES_CONF
 confidence = config.CONFIDENCE
 iou = config.IOU
 frame_interval = config.FRAME_INTERVAL
-downscale_on = config.DOWNSCALE
+# downscale_on = config.DOWNSCALE
 
 zoom_controller = ZoomController(
     zoom_enabled=config.ZOOM_ENABLED,
