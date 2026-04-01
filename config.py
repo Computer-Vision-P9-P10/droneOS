@@ -1,8 +1,8 @@
 # MODEL_PATH = "yolo12s.pt"
 MODEL_PATH = "PPE-Drone-Models/3x/yolo26s/best.pt"
 # VIDEO_PATH = 0
-VIDEO_PATH = "./videos/DJI_0017.MP4"
-# VIDEO_PATH = "./videos/amar/DJI_0018.MP4"
+# VIDEO_PATH = "./videos/DJI_0017.MP4"
+VIDEO_PATH = "./videos/amar/DJI_0018.MP4"
 BACKEND_HOST = "0.0.0.0"
 
 FILTERS_ON = False
@@ -24,6 +24,8 @@ GLOVES_CONF = 0.1
 TRACKER_YAML = "custom_bytetrack.yaml"
 MIN_TRACK_FRAMES = 20
 STALE_TRACK_FRAMES = 120
+PPE_COMPLIANCE_THRESHOLD = 0.70
+PPE_COMPLIANCE_MIN_FRAMES = 10
 
 # Zoom config
 ZOOM_ENABLED = False
