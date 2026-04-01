@@ -4,7 +4,6 @@ from ultralytics import YOLO
 import numpy as np
 import time
 
-# from centroid_tracker import track_and_update_persons, boxes_overlap, get_centroid
 from zoom_controller import ZoomController
 from events import trigger_on_person_detected
 import config
