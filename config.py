@@ -25,7 +25,7 @@ BOOTS_CONF = 0.1
 GLOVES_CONF = 0.1
 
 # Events config
-STATE_CHANGE_MIN_SECONDS = 10.0
+STATE_CHANGE_MIN_SECONDS = 2.0
 
 # Tracker config
 TRACKER_YAML = "custom_bytetrack.yaml"
