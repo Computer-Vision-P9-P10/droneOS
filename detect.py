@@ -4,7 +4,7 @@ import numpy as np
 import time
 
 from zoom_controller import ZoomController
-from events import trigger_on_person_detected
+from events import trigger_event
 import config
 from box_utils import (
     define_boxes,
@@ -21,14 +21,12 @@ if not cap.isOpened():
     print("Error: Could not open video file.")
     exit(1)
 
-backend_host = config.BACKEND_HOST
-
-person_conf = config.PERSON_CONF
-vest_conf = config.VEST_CONF
-helmet_conf = config.HELMET_CONF
-confidence = config.CONFIDENCE
-iou = config.IOU
-frame_interval = config.FRAME_INTERVAL
+PERSON_CONF = getattr(config, "PERSON_CONF", 0.6)
+VEST_CONF = getattr(config, "VEST_CONF", 0.4)
+HELMET_CONF = getattr(config, "HELMET_CONF", 0.4)
+CONFIDENCE = getattr(config, "CONFIDENCE", 0.1)
+IOU = getattr(config, "IOU", 0.6)
+FRAME_INTERVAL = getattr(config, "FRAME_INTERVAL", 1)
 
 TRACKER_YAML = getattr(config, "TRACKER_YAML", "custom_bytetrack.yaml")
 MIN_TRACK_FRAMES = getattr(config, "MIN_TRACK_FRAMES", 20)
@@ -48,11 +46,8 @@ zoom_controller = ZoomController(
 )
 
 frame_count = 0
-on_person_detected_count = 0
+event_count = 0
 processed_frames = 0
-
-person_history = {}
-tracked_people = []
 
 
 def iou_xyxy(a, b):
@@ -102,17 +97,27 @@ def best_region_match(person_box, ppe_boxes, region="full", min_iou=0.1):
 def is_compliant(hist, threshold=PPE_COMPLIANCE_THRESHOLD, min_frames=PPE_COMPLIANCE_MIN_FRAMES):
     frames = hist.get("frames", 0)
     if frames < min_frames:
-        return None
+        return "unknown"
+
     vest_ratio = hist.get("vest_frames", 0) / frames
     helmet_ratio = hist.get("helmet_frames", 0) / frames
-    return vest_ratio >= threshold and helmet_ratio >= threshold
+
+    if vest_ratio >= threshold and helmet_ratio >= threshold:
+        return "compliant"
+
+    return "violation"
 
 
-def compliance_color(hist):
-    result = is_compliant(hist)
-    if result is None:
-        return (0, 255, 255)   # yellow
-    return (0, 200, 0) if result else (0, 0, 255)  # green or red
+def get_current_state(hist):
+    return hist.get("state", "unknown")
+
+
+def compliance_color_from_state(state):
+    if state == "unknown":
+        return (0, 255, 255)
+    if state == "compliant":
+        return (0, 200, 0)
+    return (0, 0, 255)
 
 
 def cleanup_person_history(person_history, frame_count, min_frames, stale_frames):
@@ -129,7 +134,7 @@ def cleanup_person_history(person_history, frame_count, min_frames, stale_frames
         del person_history[pid]
 
 
-def draw_top_left_overlay(frame, tracked_people, person_history):
+def draw_top_left_overlay(frame, current_frame_people, person_history):
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.58
     thickness = 2
@@ -137,16 +142,19 @@ def draw_top_left_overlay(frame, tracked_people, person_history):
     padding = 10
     margin = 12
 
-    active_ids = sorted([
-        int(p["track_id"])
-        for p in tracked_people
-        if p["track_id"] is not None
-    ])
+    current_frame_track_ids = sorted(
+        int(person["track_id"])
+        for person in current_frame_people
+        if person["track_id"] is not None
+    )
 
     lines = []
-    lines.append("Active IDs: " + (", ".join(map(str, active_ids)) if active_ids else "none"))
+    lines.append(
+        "Active IDs: "
+        + (", ".join(map(str, current_frame_track_ids)) if current_frame_track_ids else "none")
+    )
 
-    for person in tracked_people:
+    for person in current_frame_people:
         pid = person["track_id"]
         conf = person["conf"]
         has_vest_now = person.get("has_vest_now", False)
@@ -171,10 +179,10 @@ def draw_top_left_overlay(frame, tracked_people, person_history):
         vest_pct = int(100 * hist.get("vest_frames", 0) / frames)
         helmet_pct = int(100 * hist.get("helmet_frames", 0) / frames)
 
-        compliant = is_compliant(hist)
-        if compliant is True:
+        compliance_state = get_current_state(hist)
+        if compliance_state == "compliant":
             status = "OK"
-        elif compliant is False:
+        elif compliance_state == "violation":
             status = "NO PPE"
         else:
             status = "..."
@@ -214,6 +222,8 @@ def draw_top_left_overlay(frame, tracked_people, person_history):
         )
 
 
+person_history = {}
+
 while True:
     t0 = time.time()
     ret, frame = cap.read()
@@ -225,8 +235,8 @@ while True:
     t4 = time.time()
 
     track_kwargs = dict(
-        conf=confidence,
-        iou=iou,
+        conf=CONFIDENCE,
+        iou=IOU,
         imgsz=640,
         verbose=False,
         persist=True,
@@ -245,12 +255,12 @@ while True:
     frame_count += 1
     processed_frames += 1
 
-    filtered_boxes = []
-    tracked_people = []
-    active_ids = []
+    current_frame_boxes = []
+    current_frame_people = []
+    current_frame_track_ids = []
     class_names = model.names if hasattr(model, "names") else {}
 
-    if frame_count % frame_interval == 0:
+    if frame_count % FRAME_INTERVAL == 0:
         result = results[0]
         boxes_obj = result.boxes
 
@@ -272,41 +282,28 @@ while True:
 
                 box_row = np.array([x1, y1, x2, y2, conf, class_id], dtype=float)
 
-                if label == "person" and conf >= person_conf:
-                    filtered_boxes.append(box_row)
-                    tracked_people.append({
+                if label == "person" and conf >= PERSON_CONF:
+                    current_frame_boxes.append(box_row)
+                    current_frame_people.append({
                         "track_id": track_ids[i],
                         "box": [x1, y1, x2, y2],
                         "conf": conf,
-                        "class_id": class_id,
                         "has_vest_now": False,
                         "has_helmet_now": False,
                     })
-                elif label == "vest" and conf >= vest_conf:
-                    filtered_boxes.append(box_row)
-                elif label == "helmet" and conf >= helmet_conf:
-                    filtered_boxes.append(box_row)
+                elif label == "vest" and conf >= VEST_CONF:
+                    current_frame_boxes.append(box_row)
+                elif label == "helmet" and conf >= HELMET_CONF:
+                    current_frame_boxes.append(box_row)
 
-        define_boxes(filtered_boxes, model)
+        define_boxes(current_frame_boxes, model)
 
-        if len(person_boxes) > 0 and len(vest_boxes) == 0 and len(helmet_boxes) == 0:
-            zoom_controller.increment_zoom_only_person_frames()
-        else:
-            zoom_controller.reset_zoom_only_person_frames()
-
-        if zoom_controller.should_zoom_in():
-            zoom_controller.zoomed_in = True
-
-        if zoom_controller.zoomed_in and len(person_boxes) == 0:
-            zoom_controller.disable_zoom()
-
-        for person in tracked_people:
+        for person in current_frame_people:
             track_id = person["track_id"]
             if track_id is None:
                 continue
 
             pid = int(track_id)
-            active_ids.append(pid)
             person_box = person["box"]
 
             vest_match = best_region_match(person_box, vest_boxes, region="vest", min_iou=0.15)
@@ -319,7 +316,9 @@ while True:
                 "frames": 0,
                 "vest_frames": 0,
                 "helmet_frames": 0,
-                "detected": False,
+                "state": "unknown",
+                "state_changed_at_frame": frame_count,
+                "last_sent_state": None,
                 "last_seen_frame": frame_count,
                 "last_box": person_box,
             })
@@ -333,7 +332,20 @@ while True:
             if helmet_match is not None:
                 hist["helmet_frames"] += 1
 
-        active_ids = sorted(set(active_ids))
+            current_state = is_compliant(hist)
+            previous_state = hist.get("state", "unknown")
+
+            if current_state != previous_state:
+                hist["state"] = current_state
+                hist["state_changed_at_frame"] = frame_count
+            else:
+                hist["state"] = current_state
+
+        current_frame_track_ids = sorted(
+            int(person["track_id"])
+            for person in current_frame_people
+            if person["track_id"] is not None
+        )
 
         cleanup_person_history(
             person_history,
@@ -342,32 +354,21 @@ while True:
             STALE_TRACK_FRAMES,
         )
 
-        on_person_detected_count = trigger_on_person_detected(
-            person_history, cap, on_person_detected_count, backend_host
+        event_count = trigger_event(
+            person_history,
+            cap,
+            event_count,
         )
-    else:
-        active_ids = sorted({
-            int(p["track_id"])
-            for p in tracked_people
-            if p["track_id"] is not None
-        })
 
     if not config.CONSOLE_OUTPUT:
-        for person in tracked_people:
+        for person in current_frame_people:
             x1, y1, x2, y2 = map(int, person["box"])
             pid = person["track_id"]
             person_confidence = person["conf"]
 
             hist = person_history.get(int(pid)) if pid is not None else None
-            color = compliance_color(hist) if hist else (0, 255, 255)
-            compliant = is_compliant(hist) if hist else None
-
-            if compliant is True:
-                status = "OK"
-            elif compliant is False:
-                status = "NO PPE"
-            else:
-                status = "..."
+            current_state = get_current_state(hist) if hist else "unknown"
+            color = compliance_color_from_state(current_state)
 
             label = (
                 f"ID {pid} Person:{person_confidence:.2f}"
@@ -387,7 +388,7 @@ while True:
                 cv2.LINE_AA,
             )
 
-        for box in filtered_boxes:
+        for box in current_frame_boxes:
             x1, y1, x2, y2 = map(int, box[:4])
             conf = box[4]
             class_id = int(box[5])
@@ -406,7 +407,7 @@ while True:
                     cv2.LINE_AA,
                 )
 
-        draw_top_left_overlay(frame, tracked_people, person_history)
+        draw_top_left_overlay(frame, current_frame_people, person_history)
     t6 = time.time()
 
     if config.CONSOLE_OUTPUT and frame_count % 30 == 0:
@@ -417,10 +418,10 @@ while True:
         )
         detected_names = [
             class_names.get(int(box[5]), str(int(box[5])))
-            for box in filtered_boxes
+            for box in current_frame_boxes
         ]
         print(
-            f"[Frame {frame_count}] FPS: {fps:.1f} - Active IDs: {active_ids} - Detected: {len(filtered_boxes)} ({', '.join(detected_names)})"
+            f"[Frame {frame_count}] FPS: {fps:.1f} - Active IDs: {current_frame_track_ids} - Detected: {len(current_frame_boxes)} ({', '.join(detected_names)})"
         )
         print(
             f"Timing (ms): read={1000 * (t1 - t0):.1f}, zoom={1000 * (t4 - t1):.1f}, inference={1000 * (t5 - t4):.1f}, draw={1000 * (t6 - t5):.1f}"
@@ -446,12 +447,12 @@ real_fps = processed_frames / elapsed if elapsed > 0 else 0.0
 
 print("\n\n" + "=" * 20 + " Results " + "=" * 20)
 print(f"\nProcessed FPS (measured): {real_fps:.2f}")
-print(f"'on_person_detected' called: {on_person_detected_count} times")
+print(f"'on_person_detected' called: {event_count} times")
 
 if person_history:
     print("\n=== PERSON HISTORY ===")
     print(f"  PPE compliance threshold: {PPE_COMPLIANCE_THRESHOLD:.0%} over {PPE_COMPLIANCE_MIN_FRAMES}+ frames")
-    print(f"  Person conf: {person_conf} | Vest conf: {vest_conf} | Helmet conf: {helmet_conf}")
+    print(f"  Person conf: {PERSON_CONF} | Vest conf: {VEST_CONF} | Helmet conf: {HELMET_CONF}")
     print("-" * 40)
 
     for pid, hist in sorted(person_history.items()):
@@ -462,14 +463,21 @@ if person_history:
         vest_ratio = vest_frames / total_frames if total_frames > 0 else 0.0
         helmet_ratio = helmet_frames / total_frames if total_frames > 0 else 0.0
 
-        compliant = is_compliant(hist)
-        compliance_str = "COMPLIANT" if compliant else ("UNKNOWN" if compliant is None else "NON-COMPLIANT")
+        compliance_state = get_current_state(hist)
+
+        if compliance_state == "compliant":
+            compliance_str = "COMPLIANT"
+        elif compliance_state == "violation":
+            compliance_str = "VIOLATION"
+        else:
+            compliance_str = "STATE UNKNOWN"
 
         print(f"Person ID {pid}: [{compliance_str}]")
         print(f"  Frames in view: {total_frames}")
         print(f"  Vest frames: {vest_frames} ({vest_ratio:.1%})")
         print(f"  Helmet frames: {helmet_frames} ({helmet_ratio:.1%})")
-        print(f"  Detected flag: {hist.get('detected', False)}")
+        print(f"  Current state: {hist.get('state', 'unknown')}")
+        print(f"  Last sent state: {hist.get('last_sent_state', None)}")
         print("-" * 40)
 else:
     print("No persons tracked.")
