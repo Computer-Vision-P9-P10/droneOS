@@ -1,23 +1,38 @@
-MODEL_PATH = "yolo26s.pt"
+# MODEL_PATH = "yolo12s.pt"
+MODEL_PATH = "PPE-Drone-Models/3x/yolo26s/best.pt"
 # VIDEO_PATH = 0
-VIDEO_PATH = "C:\\Users\\Gustas\\Desktop\\Drone_Dataset_Videos\\DJI_0027.MP4"
-# VIDEO_PATH = "./videos/amar/DJI_0013.MP4"
+VIDEO_PATH = "./videos/DJI_0017.MP4" # Compliance example
+# VIDEO_PATH = "./videos/DJI_0006.MP4" # Violation example (only in beginning of video)
+# VIDEO_PATH = "./videos/DJI_0008.MP4" # Violation example (Full video)
+# VIDEO_PATH = "./videos/DJI_0019.MP4" # Hardware zoom example
+# VIDEO_PATH = "./videos/DJI_0020.MP4" # Dark hardware zoom example
+# VIDEO_PATH = "./videos/amar/DJI_0018.MP4"
 BACKEND_HOST = "0.0.0.0"
 
 FILTERS_ON = False
 CONSOLE_OUTPUT = False 
 DEVICE = "cpu"  # "cuda" or "cpu"
 
-PERSON_CONF = 0.4
-VEST_CONF = 0.1
-HELMET_CONF = 0.1
-BOOTS_CONF = 0.1
-GLOVES_CONF = 0.1
-
+# Detection config
 CONFIDENCE = 0.1
 IOU = 0.6
 FRAME_INTERVAL = 1
 
+PERSON_CONF = 0.6
+VEST_CONF = 0.4
+HELMET_CONF = 0.4
+BOOTS_CONF = 0.1
+GLOVES_CONF = 0.1
+
+# Events config
+STATE_CHANGE_MIN_SECONDS = 2.0
+
+# Tracker config
+TRACKER_YAML = "custom_bytetrack.yaml"
+MIN_TRACK_FRAMES = 20
+STALE_TRACK_FRAMES = 120
+PPE_COMPLIANCE_THRESHOLD = 0.70
+PPE_COMPLIANCE_MIN_FRAMES = 20
 
 # Zoom config
 ZOOM_ENABLED = False
