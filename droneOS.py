@@ -3,6 +3,7 @@ import json
 import time
 import threading
 from Telemetry_Generator.telemetryGen import FlightPathSimulator
+from test_detect import run_detector
 
 BROKER = "localhost"
 PORT = 1883
@@ -17,6 +18,9 @@ telemetry_running = threading.Event()
 telemetry_thread = None
 telemetry_lock = threading.Lock()
 simulator = FlightPathSimulator(start_lat=57.048, start_lon=9.918)
+cv_running = threading.Event()
+cv_stop_event = threading.Event()
+cv_thread = None
 
 
 def perform_return_home():
@@ -66,23 +70,61 @@ def perform_stop_telemetry():
 
 
 def perform_start_cv():
+    global cv_thread
+    if cv_running.is_set():
+        print("Computer vision already running.")
+        return
+
     print("Starting computer vision...")
-    threading.Thread(target=cv_worker, daemon=True).start()
+    cv_stop_event.clear()
+    cv_running.set()
+    cv_thread = threading.Thread(target=cv_worker, daemon=True)
+    cv_thread.start()
+
+
+def perform_stop_cv():
+    if not cv_running.is_set():
+        print("Computer vision already stopped.")
+        return
+
+    print("Stopping computer vision...")
+    cv_stop_event.set()
+
+
+def publish_cv_detection(detection_payload):
+    with telemetry_lock:
+        telemetry = simulator.get_telemetry()
+
+    counts = detection_payload.get("counts", {})
+    person_count = int(counts.get("person", 0))
+    helmet_count = int(counts.get("helmet", 0))
+    vest_count = int(counts.get("vest", 0))
+
+    event = {
+        "type": "cv_detection",
+        "detections": detection_payload.get("detections", []),
+        "counts": {
+            "person": person_count,
+            "helmet": helmet_count,
+            "vest": vest_count,
+        },
+        "ppe_violation": person_count > helmet_count or person_count > vest_count,
+        "missing_helmet": max(person_count - helmet_count, 0),
+        "missing_vest": max(person_count - vest_count, 0),
+        "lat": telemetry["lat"],
+        "lon": telemetry["lon"],
+        "timestamp": telemetry["timestamp"],
+    }
+    client.publish(DETECTION_TOPIC, json.dumps(event), qos=1)
 
 
 def cv_worker():
-    while True:
-        with telemetry_lock:
-            telemetry = simulator.get_telemetry()
-        event = {
-            "type": "cv_detection",
-            "detected": "person",
-            "lat": telemetry["lat"],
-            "lon": telemetry["lon"],
-            "timestamp": telemetry["timestamp"],
-        }
-        client.publish(DETECTION_TOPIC, json.dumps(event), qos=1)
-        time.sleep(5)
+    try:
+        run_detector(stop_event=cv_stop_event, on_detection=publish_cv_detection)
+    except Exception as e:
+        print(f"CV worker error: {e}")
+    finally:
+        cv_running.clear()
 
 
 COMMAND_MAP = {
@@ -91,6 +133,7 @@ COMMAND_MAP = {
     "HOVER": perform_hover,
     "CIRCLE": perform_circle,
     "START_CV": perform_start_cv,
+    "STOP_CV": perform_stop_cv,
     "START_TELEMETRY": perform_start_telemetry,
     "STOP_TELEMETRY": perform_stop_telemetry,
 }
@@ -150,6 +193,7 @@ except KeyboardInterrupt:
     print("Shutting down...")
 finally:
     telemetry_running.clear()
+    cv_stop_event.set()
     client.publish(STATUS_TOPIC, "offline", qos=1, retain=True)
     client.loop_stop()
     client.disconnect()

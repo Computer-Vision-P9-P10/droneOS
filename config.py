@@ -1,6 +1,6 @@
 MODEL_PATH = "yolo26s.pt"
 # VIDEO_PATH = 0
-VIDEO_PATH = "./videos/DJI_0017.MP4"
+VIDEO_PATH = "C:\\Users\\Gustas\\Desktop\\Drone_Dataset_Videos\\DJI_0027.MP4"
 # VIDEO_PATH = "./videos/amar/DJI_0013.MP4"
 BACKEND_HOST = "0.0.0.0"
 
@@ -20,7 +20,7 @@ FRAME_INTERVAL = 1
 
 
 # Zoom config
-ZOOM_ENABLED = True
+ZOOM_ENABLED = False
 ZOOM_FACTOR = 2
 ZOOM_MIN_DURATION = 2
 ZOOM_PERSON_FRAME_THRESHOLD = 10
