@@ -2,7 +2,7 @@ import paho.mqtt.client as mqtt
 import json
 import time
 import threading
-from datetime import datetime, timezone
+from Telemetry_Generator.telemetryGen import FlightPathSimulator
 
 BROKER = "localhost"
 PORT = 1883
@@ -15,6 +15,8 @@ DETECTION_TOPIC = "drone/detection"
 
 telemetry_running = threading.Event()
 telemetry_thread = None
+telemetry_lock = threading.Lock()
+simulator = FlightPathSimulator(start_lat=57.048, start_lon=9.918)
 
 
 def perform_return_home():
@@ -35,15 +37,11 @@ def perform_circle():
 
 def telemetry_worker():
     while telemetry_running.is_set():
-        telemetry = {
-            "lat": 57.048,
-            "lon": 9.918,
-            "altitude": 120,
-            "battery": 87,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        with telemetry_lock:
+            simulator.update()
+            telemetry = simulator.get_telemetry()
         client.publish(TELEMETRY_TOPIC, json.dumps(telemetry), qos=0)
-        time.sleep(10)
+        time.sleep(1)
 
 
 def perform_start_telemetry():
@@ -74,14 +72,14 @@ def perform_start_cv():
 
 def cv_worker():
     while True:
-        detected = "person"
-        current_lat, current_lon = 57.048, 9.918
+        with telemetry_lock:
+            telemetry = simulator.get_telemetry()
         event = {
             "type": "cv_detection",
-            "detected": detected,
-            "lat": current_lat,
-            "lon": current_lon,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "detected": "person",
+            "lat": telemetry["lat"],
+            "lon": telemetry["lon"],
+            "timestamp": telemetry["timestamp"],
         }
         client.publish(DETECTION_TOPIC, json.dumps(event), qos=1)
         time.sleep(5)
