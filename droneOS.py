@@ -2,7 +2,10 @@ import paho.mqtt.client as mqtt
 import json
 import time
 import threading
+import uuid
+from datetime import datetime, timezone
 from Telemetry_Generator.telemetryGen import FlightPathSimulator
+import config
 from detect import run_detector
 
 BROKER = "localhost"
@@ -12,6 +15,7 @@ TELEMETRY_TOPIC = "drone/telemetry"
 STATUS_TOPIC = "drone/status"
 COMMAND_TOPIC = "drone/command"
 DETECTION_TOPIC = "drone/detection"
+MISSION_TOPIC = "drone/mission"
 
 
 telemetry_running = threading.Event()
@@ -21,6 +25,12 @@ simulator = FlightPathSimulator(start_lat=57.048, start_lon=9.918)
 cv_running = threading.Event()
 cv_stop_event = threading.Event()
 cv_thread = None
+current_mission_id = None
+current_mission_started_at = None
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _to_json_safe(value):
@@ -34,6 +44,42 @@ def _to_json_safe(value):
     if isinstance(value, (list, tuple)):
         return [_to_json_safe(v) for v in value]
     return value
+
+
+def _publish_mission_started(source="START_CV"):
+    global current_mission_id, current_mission_started_at
+
+    current_mission_id = str(uuid.uuid4())
+    current_mission_started_at = _now_iso()
+    event = {
+        "event": "mission_started",
+        "mission_id": current_mission_id,
+        "started_at": current_mission_started_at,
+        "source": source,
+        "model": getattr(config, "MODEL_PATH", None),
+        "video_source": getattr(config, "VIDEO_PATH", None),
+    }
+
+    client.publish(MISSION_TOPIC, json.dumps(_to_json_safe(event)), qos=1)
+
+
+def _publish_mission_stopped(reason):
+    global current_mission_id, current_mission_started_at
+
+    if current_mission_id is None:
+        return
+
+    event = {
+        "event": "mission_stopped",
+        "mission_id": current_mission_id,
+        "started_at": current_mission_started_at,
+        "stopped_at": _now_iso(),
+        "reason": reason,
+    }
+    current_mission_id = None
+    current_mission_started_at = None
+
+    client.publish(MISSION_TOPIC, json.dumps(_to_json_safe(event)), qos=1)
 
 
 def perform_return_home():
@@ -89,6 +135,8 @@ def perform_start_cv():
         return
 
     print("Starting computer vision...")
+    _publish_mission_started(source="START_CV")
+    time.sleep(1)
     cv_stop_event.clear()
     cv_running.set()
     cv_thread = threading.Thread(target=cv_worker, daemon=True)
@@ -112,7 +160,8 @@ def publish_cv_detection(detection_payload):
         telemetry = simulator.get_telemetry()
 
     event = {
-        "type": "cv_detection",
+        "event": "cv_detection",
+        "mission_id": current_mission_id,
         "person_id": detection_payload.get("person_id"),
         "state": detection_payload.get("state", "unknown"),
         "frame_count": detection_payload.get("frame_count"),
@@ -125,11 +174,16 @@ def publish_cv_detection(detection_payload):
 
 
 def cv_worker():
+    stop_reason = "stream_end"
     try:
         run_detector(stop_event=cv_stop_event, on_person_state_change=publish_cv_detection)
     except Exception as e:
+        stop_reason = "error"
         print(f"CV worker error: {e}")
     finally:
+        if stop_reason != "error" and cv_stop_event.is_set():
+            stop_reason = "command_stop"
+        _publish_mission_stopped(reason=stop_reason)
         cv_running.clear()
 
 

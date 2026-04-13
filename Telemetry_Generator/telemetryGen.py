@@ -10,13 +10,18 @@ class FlightPathSimulator:
         self.battery = 100
         self.last_update = time.time()
 
-        # We define waypoints for the simulation. Potentially explore using video file data.
-        offset = 0.001  # aprox 100m in degrees. Lat long version.
+        # Fixed scan pattern: 100m forward, 20m left, 100m backward, 20m left.
+        meters_to_lat = 1 / 111_000
+        meters_to_lon = 1 / (111_000 * max(0.1, abs(math.cos(math.radians(start_lat)))))
+        forward_100m = 100 * meters_to_lat
+        left_20m = 20 * meters_to_lon
+
+        # Define waypoints for what is being published when START_TELEMETRY is called by MQTT backend.
         self.waypoints = [
-            (start_lat + offset, start_lon),
-            (start_lat + offset, start_lon + offset),
-            (start_lat,          start_lon + offset),
-            (start_lat,          start_lon),
+            (start_lat + forward_100m, start_lon),
+            (start_lat + forward_100m, start_lon - left_20m),
+            (start_lat,                start_lon - left_20m),
+            (start_lat,                start_lon - 2 * left_20m),
         ]
         self.waypoint_index = 0
 
