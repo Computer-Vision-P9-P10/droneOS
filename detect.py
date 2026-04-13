@@ -39,6 +39,22 @@ def _build_frame_summary(current_frame_people):
     return {"detections": detections, "counts": counts}
 
 
+def _get_violation_type(state, vest_ratio, helmet_ratio, threshold):
+    if state != "violation":
+        return "none"
+
+    missing_vest = vest_ratio < threshold
+    missing_helmet = helmet_ratio < threshold
+
+    if missing_vest and missing_helmet:
+        return "missing_vest_and_helmet"
+    elif missing_vest:
+        return "missing_vest"
+    elif missing_helmet:
+        return "missing_helmet"
+    return "unknown_violation"
+
+
 def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None):
     start_time = time.time()
 
@@ -57,6 +73,8 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
     tracker_yaml = getattr(config, "TRACKER_YAML", "custom_bytetrack.yaml")
     min_track_frames = getattr(config, "MIN_TRACK_FRAMES", 20)
     stale_track_frames = getattr(config, "STALE_TRACK_FRAMES", 120)
+    ppe_compliance_threshold = getattr(config, "PPE_COMPLIANCE_THRESHOLD", 0.70)
+    show_live_feed = getattr(config, "SHOW_LIVE_FEED", False)
 
     zoom_controller = ZoomController(
         zoom_enabled=config.ZOOM_ENABLED,
@@ -117,6 +135,7 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
             current_frame_boxes = []
             current_frame_people = []
             current_frame_track_ids = []
+            pending_state_events = []
             class_names = model.names if hasattr(model, "names") else {}
 
             if frame_count % frame_interval == 0:
@@ -184,12 +203,18 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
                             "last_sent_state": None,
                             "last_seen_frame": frame_count,
                             "last_box": person_box,
+                            "last_person_conf": 0.0,
+                            "last_vest_conf": 0.0,
+                            "last_helmet_conf": 0.0,
                         },
                     )
 
                     hist["frames"] += 1
                     hist["last_seen_frame"] = frame_count
                     hist["last_box"] = person_box
+                    hist["last_person_conf"] = float(person["conf"])
+                    hist["last_vest_conf"] = float(vest_match[4]) if vest_match is not None else 0.0
+                    hist["last_helmet_conf"] = float(helmet_match[4]) if helmet_match is not None else 0.0
 
                     if vest_match is not None:
                         hist["vest_frames"] += 1
@@ -234,59 +259,69 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
                         frames = max(event.get("frames", 0), 1)
                         event["vest_ratio"] = event.get("vest_frames", 0) / frames
                         event["helmet_ratio"] = event.get("helmet_frames", 0) / frames
+                        event["violation_type"] = _get_violation_type(
+                            event.get("state", "unknown"),
+                            event["vest_ratio"],
+                            event["helmet_ratio"],
+                            ppe_compliance_threshold,
+                        )
                         event["counts"] = summary["counts"]
                         event["detections"] = summary["detections"]
                         event["frame_count"] = frame_count
-                        on_person_state_change(event)
+                        pending_state_events.append(event)
 
-            if not config.CONSOLE_OUTPUT:
-                for person in current_frame_people:
-                    x1, y1, x2, y2 = map(int, person["box"])
-                    pid = person["track_id"]
-                    person_confidence = person["conf"]
+            for person in current_frame_people:
+                x1, y1, x2, y2 = map(int, person["box"])
+                pid = person["track_id"]
+                person_confidence = person["conf"]
 
-                    hist = person_history.get(int(pid)) if pid is not None else None
-                    current_state = get_current_state(hist) if hist else "unknown"
-                    color = compliance_color_from_state(current_state)
+                hist = person_history.get(int(pid)) if pid is not None else None
+                current_state = get_current_state(hist) if hist else "unknown"
+                color = compliance_color_from_state(current_state)
 
-                    label = (
-                        f"ID {pid} Person:{person_confidence:.2f}"
-                        if pid is not None
-                        else f"person P:{person_confidence:.2f}"
-                    )
+                label = (
+                    f"ID {pid} Person:{person_confidence:.2f}"
+                    if pid is not None
+                    else f"person P:{person_confidence:.2f}"
+                )
 
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(
+                    frame,
+                    label,
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    color,
+                    2,
+                    cv2.LINE_AA,
+                )
+
+            for box in current_frame_boxes:
+                x1, y1, x2, y2 = map(int, box[:4])
+                conf = box[4]
+                class_id = int(box[5])
+                label = class_names.get(class_id, str(class_id)).lower()
+
+                if label != "person":
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 165, 0), 2)
                     cv2.putText(
                         frame,
-                        label,
+                        f"{label} {conf:.2f}",
                         (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        color,
-                        2,
+                        0.55,
+                        (255, 165, 0),
+                        1,
                         cv2.LINE_AA,
                     )
 
-                for box in current_frame_boxes:
-                    x1, y1, x2, y2 = map(int, box[:4])
-                    conf = box[4]
-                    class_id = int(box[5])
-                    label = class_names.get(class_id, str(class_id)).lower()
+            draw_top_left_overlay(frame, current_frame_people, person_history)
 
-                    if label != "person":
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 165, 0), 2)
-                        cv2.putText(
-                            frame,
-                            f"{label} {conf:.2f}",
-                            (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.55,
-                            (255, 165, 0),
-                            1,
-                            cv2.LINE_AA,
-                        )
-
-                draw_top_left_overlay(frame, current_frame_people, person_history)
+            if on_person_state_change is not None and pending_state_events:
+                snapshot_frame = frame.copy()
+                for event in pending_state_events:
+                    on_person_state_change(event, snapshot_frame)
             t6 = time.time()
 
             if config.CONSOLE_OUTPUT and frame_count % 30 == 0:
@@ -306,7 +341,7 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
                     f"Timing (ms): read={1000 * (t1 - t0):.1f}, zoom={1000 * (t4 - t1):.1f}, inference={1000 * (t5 - t4):.1f}, draw={1000 * (t6 - t5):.1f}"
                 )
 
-            if not config.CONSOLE_OUTPUT:
+            if show_live_feed:
                 cv2.imshow("Video", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     stop_event.set()

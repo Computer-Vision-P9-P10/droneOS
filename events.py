@@ -47,6 +47,9 @@ def collect_state_change_events(
                 "frames": int(hist.get("frames", 0)),
                 "vest_frames": int(hist.get("vest_frames", 0)),
                 "helmet_frames": int(hist.get("helmet_frames", 0)),
+                "person_confidence": float(hist.get("last_person_conf", 0.0)),
+                "vest_confidence": float(hist.get("last_vest_conf", 0.0)),
+                "helmet_confidence": float(hist.get("last_helmet_conf", 0.0)),
                 "last_seen_frame": int(hist.get("last_seen_frame", 0)),
                 "last_box": hist.get("last_box"),
             }

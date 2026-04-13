@@ -11,6 +11,7 @@ BACKEND_HOST = "0.0.0.0"
 
 FILTERS_ON = False
 CONSOLE_OUTPUT = False 
+SHOW_LIVE_FEED = False
 DEVICE = "cpu"  # "cuda" or "cpu"
 
 # Detection config

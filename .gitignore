@@ -1,7 +1,7 @@
 # Repo specific
 videos/
 videos
-
+captures/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

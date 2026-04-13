@@ -3,7 +3,14 @@ import json
 import time
 import threading
 import uuid
+import os
+import cv2
+import hmac
+import hashlib
+import secrets
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
 from Telemetry_Generator.telemetryGen import FlightPathSimulator
 import config
 from detect import run_detector
@@ -16,6 +23,14 @@ STATUS_TOPIC = "drone/status"
 COMMAND_TOPIC = "drone/command"
 DETECTION_TOPIC = "drone/detection"
 MISSION_TOPIC = "drone/mission"
+IMAGE_REQUEST_TOPIC = "drone/image_request"
+IMAGE_RESPONSE_TOPIC = "drone/image_response"
+CAPTURE_ROOT = "captures"
+IMAGE_HTTP_BIND_HOST = getattr(config, "IMAGE_HTTP_BIND_HOST", "0.0.0.0")
+IMAGE_HTTP_PORT = int(getattr(config, "IMAGE_HTTP_PORT", 8081))
+IMAGE_HTTP_PUBLIC_HOST = getattr(config, "IMAGE_HTTP_PUBLIC_HOST", "localhost")
+IMAGE_URL_TTL_SECONDS = int(getattr(config, "IMAGE_URL_TTL_SECONDS", 10))
+IMAGE_URL_SIGNING_SECRET = getattr(config, "IMAGE_URL_SIGNING_SECRET", None)
 
 
 telemetry_running = threading.Event()
@@ -27,6 +42,10 @@ cv_stop_event = threading.Event()
 cv_thread = None
 current_mission_id = None
 current_mission_started_at = None
+next_violation_id = 1
+image_http_server = None
+image_http_thread = None
+IMAGE_URL_SIGNING_SECRET = str(IMAGE_URL_SIGNING_SECRET or secrets.token_hex(32))
 
 
 def _now_iso():
@@ -47,10 +66,12 @@ def _to_json_safe(value):
 
 
 def _publish_mission_started(source="START_CV"):
-    global current_mission_id, current_mission_started_at
+    global current_mission_id, current_mission_started_at, next_violation_id
 
     current_mission_id = str(uuid.uuid4())
     current_mission_started_at = _now_iso()
+    next_violation_id = 1
+    os.makedirs(os.path.join(CAPTURE_ROOT, current_mission_id), exist_ok=True)
     event = {
         "event": "mission_started",
         "mission_id": current_mission_id,
@@ -82,20 +103,184 @@ def _publish_mission_stopped(reason):
     client.publish(MISSION_TOPIC, json.dumps(_to_json_safe(event)), qos=1)
 
 
+def _save_violation_snapshot(mission_id, violation_id, frame):
+    mission_dir = os.path.join(CAPTURE_ROOT, mission_id)
+    os.makedirs(mission_dir, exist_ok=True)
+    image_path = os.path.join(mission_dir, f"violation_{violation_id}.jpg")
+    success = cv2.imwrite(image_path, frame)
+    return image_path if success else None
+
+
+def _publish_image_response(payload):
+    client.publish(IMAGE_RESPONSE_TOPIC, json.dumps(_to_json_safe(payload)), qos=1)
+
+
+def _build_image_path(mission_id, violation_id):
+    return os.path.join(CAPTURE_ROOT, mission_id, f"violation_{violation_id}.jpg")
+
+
+def _build_image_url(mission_id, violation_id):
+    exp = int(time.time()) + IMAGE_URL_TTL_SECONDS
+    sig = _sign_image_url(mission_id, violation_id, exp)
+    return (
+        f"http://{IMAGE_HTTP_PUBLIC_HOST}:{IMAGE_HTTP_PORT}/image/"
+        f"{mission_id}/{violation_id}.jpg?exp={exp}&sig={sig}"
+    )
+
+
+def _sign_image_url(mission_id, violation_id, exp):
+    payload = f"{mission_id}:{violation_id}:{exp}".encode("utf-8")
+    secret_key = str(IMAGE_URL_SIGNING_SECRET).encode("utf-8")
+    return hmac.new(
+        secret_key,
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _is_valid_image_token(mission_id, violation_id, exp, sig):
+    try:
+        exp_int = int(exp)
+    except (TypeError, ValueError):
+        return False
+
+    if exp_int < int(time.time()):
+        return False
+
+    expected = _sign_image_url(mission_id, violation_id, exp_int)
+    return hmac.compare_digest(expected, sig)
+
+
+class _ImageRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) != 3 or parts[0] != "image" or not parts[2].endswith(".jpg"):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        mission_id = parts[1]
+        violation_part = parts[2][:-4]
+        try:
+            violation_id = int(violation_part)
+        except ValueError:
+            self.send_response(400)
+            self.end_headers()
+            return
+
+        query = parse_qs(parsed.query)
+        exp = query.get("exp", [None])[0]
+        sig = query.get("sig", [None])[0]
+        if exp is None or sig is None or not _is_valid_image_token(mission_id, violation_id, exp, sig):
+            self.send_response(403)
+            self.end_headers()
+            return
+
+        image_path = _build_image_path(mission_id, violation_id)
+        if not os.path.exists(image_path):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        try:
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+        except OSError:
+            self.send_response(500)
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(image_data)))
+        self.end_headers()
+        self.wfile.write(image_data)
+
+    def log_message(self, format, *args):
+        return
+
+
+def _start_image_server():
+    global image_http_server, image_http_thread
+
+    image_http_server = ThreadingHTTPServer(
+        (IMAGE_HTTP_BIND_HOST, IMAGE_HTTP_PORT),
+        _ImageRequestHandler,
+    )
+    image_http_thread = threading.Thread(
+        target=image_http_server.serve_forever,
+        daemon=True,
+    )
+    image_http_thread.start()
+    print(f"Image HTTP server running on {IMAGE_HTTP_BIND_HOST}:{IMAGE_HTTP_PORT}")
+
+
+def _stop_image_server():
+    global image_http_server
+    if image_http_server is not None:
+        image_http_server.shutdown()
+        image_http_server.server_close()
+        image_http_server = None
+
+
+def _handle_image_request(data):
+    mission_id = data.get("mission_id")
+    violation_id = data.get("violation_id")
+
+    if not mission_id or violation_id is None:
+        _publish_image_response(
+            {
+                "event": "image_response",
+                "status": "error",
+                "error": "mission_id and violation_id are required",
+                "timestamp": _now_iso(),
+            }
+        )
+        return
+
+    try:
+        violation_id = int(violation_id)
+    except (TypeError, ValueError):
+        _publish_image_response(
+            {
+                "event": "image_response",
+                "status": "error",
+                "mission_id": mission_id,
+                "error": "violation_id must be an integer",
+                "timestamp": _now_iso(),
+            }
+        )
+        return
+
+    image_path = _build_image_path(mission_id, violation_id)
+    if not os.path.exists(image_path):
+        _publish_image_response(
+            {
+                "event": "image_response",
+                "status": "error",
+                "mission_id": mission_id,
+                "violation_id": violation_id,
+                "error": "image_not_found",
+                "timestamp": _now_iso(),
+            }
+        )
+        return
+
+    _publish_image_response(
+        {
+            "event": "image_response",
+            "status": "ok",
+            "mission_id": mission_id,
+            "violation_id": violation_id,
+            "image_url": _build_image_url(mission_id, violation_id),
+            "timestamp": _now_iso(),
+        }
+    )
+
+
 def perform_return_home():
     print("Returning home...")
-
-
-def perform_land():
-    print("Landing now...")
-
-
-def perform_hover():
-    print("Hovering...")
-
-
-def perform_circle():
-    print("Circling around...")
 
 
 def telemetry_worker():
@@ -155,17 +340,35 @@ def perform_stop_cv():
         cv_thread.join(timeout=5)
 
 
-def publish_cv_detection(detection_payload):
+def publish_cv_detection(detection_payload, frame=None):
+    global next_violation_id
+
     with telemetry_lock:
         telemetry = simulator.get_telemetry()
+
+    violation_id = None
+    if (
+        detection_payload.get("state") == "violation"
+        and current_mission_id is not None
+        and frame is not None
+    ):
+        violation_id = next_violation_id
+        saved_path = _save_violation_snapshot(current_mission_id, violation_id, frame)
+        if saved_path is not None:
+            next_violation_id += 1
+        else:
+            violation_id = None
 
     event = {
         "event": "cv_detection",
         "mission_id": current_mission_id,
+        "violation_id": violation_id,
         "person_id": detection_payload.get("person_id"),
         "state": detection_payload.get("state", "unknown"),
-        "frame_count": detection_payload.get("frame_count"),
-        "bbox": detection_payload.get("last_box"),
+        "violation_type": detection_payload.get("violation_type", "none"),
+        "person_confidence": detection_payload.get("person_confidence", 0.0),
+        "helmet_confidence": detection_payload.get("helmet_confidence", 0.0),
+        "vest_confidence": detection_payload.get("vest_confidence", 0.0),
         "lat": telemetry["lat"],
         "lon": telemetry["lon"],
         "timestamp": telemetry["timestamp"],
@@ -188,10 +391,6 @@ def cv_worker():
 
 
 COMMAND_MAP = {
-    "RETURN_HOME": perform_return_home,
-    "LAND": perform_land,
-    "HOVER": perform_hover,
-    "CIRCLE": perform_circle,
     "START_CV": perform_start_cv,
     "STOP_CV": perform_stop_cv,
     "START_TELEMETRY": perform_start_telemetry,
@@ -203,8 +402,9 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected to MQTT broker.")
         client.subscribe(COMMAND_TOPIC, qos=1)
+        client.subscribe(IMAGE_REQUEST_TOPIC, qos=1)
         client.publish(STATUS_TOPIC, "online", qos=1, retain=True)
-        print(f"Subscribed to {COMMAND_TOPIC}")
+        print(f"Subscribed to {COMMAND_TOPIC} and {IMAGE_REQUEST_TOPIC}")
     else:
         print(f"Failed to connect, rc={rc}")
 
@@ -216,22 +416,25 @@ def on_disconnect(client, userdata, rc):
 
 
 def on_message(client, userdata, message):
-    if message.topic != COMMAND_TOPIC:
-        return
-
     try:
         payload = message.payload.decode("utf-8")
         data = json.loads(payload)
-        cmd = data.get("cmd")
-        action = COMMAND_MAP.get(cmd)
 
-        if action:
-            print(f"Received command: {cmd}")
-            action()
+        if message.topic == COMMAND_TOPIC:
+            cmd = data.get("cmd")
+            action = COMMAND_MAP.get(cmd)
+
+            if action:
+                print(f"Received command: {cmd}")
+                action()
+            else:
+                print(f"Unknown command: {cmd}")
+        elif message.topic == IMAGE_REQUEST_TOPIC:
+            _handle_image_request(data)
         else:
-            print(f"Unknown command: {cmd}")
+            return
     except json.JSONDecodeError:
-        print(f"Invalid JSON on {COMMAND_TOPIC}: {message.payload!r}")
+        print(f"Invalid JSON on {message.topic}: {message.payload!r}")
     except Exception as e:
         print(f"Command handling error: {e}")
 
@@ -243,6 +446,7 @@ client.on_connect = on_connect
 client.on_disconnect = on_disconnect
 client.on_message = on_message
 
+_start_image_server()
 client.connect(BROKER, PORT, keepalive=10)
 client.loop_start()
 
@@ -257,3 +461,4 @@ finally:
     client.publish(STATUS_TOPIC, "offline", qos=1, retain=True)
     client.loop_stop()
     client.disconnect()
+    _stop_image_server()
