@@ -11,6 +11,7 @@ BACKEND_HOST = "0.0.0.0"
 
 FILTERS_ON = False
 CONSOLE_OUTPUT = False 
+SHOW_LIVE_FEED = False
 DEVICE = "cpu"  # "cuda" or "cpu"
 
 # Detection config
@@ -21,8 +22,6 @@ FRAME_INTERVAL = 1
 PERSON_CONF = 0.6
 VEST_CONF = 0.4
 HELMET_CONF = 0.4
-BOOTS_CONF = 0.1
-GLOVES_CONF = 0.1
 
 # Events config
 STATE_CHANGE_MIN_SECONDS = 2.0
