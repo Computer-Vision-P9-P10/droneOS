@@ -49,20 +49,36 @@ def draw_top_left_overlay(frame, current_frame_people, person_history):
             )
             continue
 
-        frames = max(hist.get("frames", 0), 1)
-        vest_pct = int(100 * hist.get("vest_frames", 0) / frames)
-        helmet_pct = int(100 * hist.get("helmet_frames", 0) / frames)
+        recent = hist.get("recent")
+        if recent is not None and len(recent) > 0:
+            frames = len(recent)
+            vest_frames = sum(1 for r in recent if r.get("vest"))
+            helmet_frames = sum(1 for r in recent if r.get("helmet"))
+            vest_pct = int(100 * vest_frames / frames)
+            helmet_pct = int(100 * helmet_frames / frames)
+            avg_vest_conf = sum(r.get("vest_conf", 0.0) for r in recent) / frames
+            avg_helmet_conf = sum(r.get("helmet_conf", 0.0) for r in recent) / frames
+            avg_person_conf = sum(r.get("person_conf", 0.0) for r in recent) / frames
+        else:
+            frames = max(hist.get("frames", 0), 1)
+            vest_pct = int(100 * hist.get("vest_frames", 0) / frames)
+            helmet_pct = int(100 * hist.get("helmet_frames", 0) / frames)
+            avg_person_conf = float(hist.get("last_person_conf", 0.0))
+            avg_vest_conf = float(hist.get("last_vest_conf", 0.0))
+            avg_helmet_conf = float(hist.get("last_helmet_conf", 0.0))
 
         compliance_state = hist.get("state", "unknown")
         if compliance_state == "compliant":
             status = "OK"
         elif compliance_state == "violation":
             status = "NO PPE"
+        elif compliance_state == "alert":
+            status = "ALERT"
         else:
             status = "..."
 
         lines.append(
-            f"ID {pid}  P:{conf:.2f}  V:{'Y' if has_vest_now else 'N'}({vest_pct}%)  H:{'Y' if has_helmet_now else 'N'}({helmet_pct}%)  {status}"
+            f"ID {pid}  P:{conf:.2f}  V:{'Y' if has_vest_now else 'N'}({vest_pct}%)  H:{'Y' if has_helmet_now else 'N'}({helmet_pct}%)  {status}  Pconf:{avg_person_conf:.2f} Vconf:{avg_vest_conf:.2f} Hconf:{avg_helmet_conf:.2f}"
         )
 
     max_width = 0

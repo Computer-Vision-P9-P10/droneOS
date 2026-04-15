@@ -1,5 +1,6 @@
 import threading
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -12,7 +13,6 @@ from person_state import cleanup_person_history, get_current_state, is_compliant
 from ppe_matching import best_region_match
 from visualization import compliance_color_from_state, draw_top_left_overlay
 from zoom_controller import ZoomController
-
 
 def _to_numpy(array_like):
     if hasattr(array_like, "cpu"):
@@ -374,7 +374,7 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
 if __name__ == "__main__":
     local_stop = threading.Event()
 
-    def print_state_event(payload):
+    def print_state_event(payload, frame=None):
         print(payload)
 
     try:
