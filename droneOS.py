@@ -29,14 +29,15 @@ CAPTURE_ROOT = "captures"
 IMAGE_HTTP_BIND_HOST = getattr(config, "IMAGE_HTTP_BIND_HOST", "0.0.0.0")
 IMAGE_HTTP_PORT = int(getattr(config, "IMAGE_HTTP_PORT", 8081))
 IMAGE_HTTP_PUBLIC_HOST = getattr(config, "IMAGE_HTTP_PUBLIC_HOST", "localhost")
-IMAGE_URL_TTL_SECONDS = int(getattr(config, "IMAGE_URL_TTL_SECONDS", 10))
+IMAGE_URL_TTL_SECONDS = int(getattr(config, "IMAGE_URL_TTL_SECONDS", 30))
 IMAGE_URL_SIGNING_SECRET = getattr(config, "IMAGE_URL_SIGNING_SECRET", None)
 
 
 telemetry_running = threading.Event()
 telemetry_thread = None
 telemetry_lock = threading.Lock()
-simulator = FlightPathSimulator(start_lat=57.048, start_lon=9.918)
+# Cassiopeia as start location
+simulator = FlightPathSimulator(start_lat=57.01239104461584, start_lon=9.991556328232413)
 cv_running = threading.Event()
 cv_stop_event = threading.Event()
 cv_thread = None
@@ -50,7 +51,6 @@ IMAGE_URL_SIGNING_SECRET = str(IMAGE_URL_SIGNING_SECRET or secrets.token_hex(32)
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
-
 
 def _to_json_safe(value):
     if hasattr(value, "item"):
