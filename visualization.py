@@ -5,8 +5,9 @@ def compliance_color_from_state(state):
         return (0, 255, 255)
     if state == "compliant":
         return (0, 200, 0)
+    if state == "alert":
+        return (0, 140, 255)
     return (0, 0, 255)
-
 
 def draw_top_left_overlay(frame, current_frame_people, person_history):
     font = cv2.FONT_HERSHEY_SIMPLEX

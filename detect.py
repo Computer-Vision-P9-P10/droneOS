@@ -209,12 +209,27 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
                         },
                     )
 
+                    hist.setdefault(
+                        "recent",
+                        deque(maxlen=getattr(config, "PERSON_HISTORY_MAX_FRAMES", 50)),
+                    )
+
                     hist["frames"] += 1
                     hist["last_seen_frame"] = frame_count
                     hist["last_box"] = person_box
                     hist["last_person_conf"] = float(person["conf"])
                     hist["last_vest_conf"] = float(vest_match[4]) if vest_match is not None else 0.0
                     hist["last_helmet_conf"] = float(helmet_match[4]) if helmet_match is not None else 0.0
+
+                    hist["recent"].append(
+                        {
+                            "vest": vest_match is not None,
+                            "helmet": helmet_match is not None,
+                            "vest_conf": hist["last_vest_conf"],
+                            "helmet_conf": hist["last_helmet_conf"],
+                            "person_conf": hist["last_person_conf"],
+                        }
+                    )
 
                     if vest_match is not None:
                         hist["vest_frames"] += 1
