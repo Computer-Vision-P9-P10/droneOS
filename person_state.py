@@ -8,6 +8,8 @@ PPE_COMPLIANCE_MIN_FRAMES = getattr(config, "PPE_COMPLIANCE_MIN_FRAMES", 10)
 PPE_CONF_VEST_THRESHOLD = getattr(config, "PPE_CONF_VEST_THRESHOLD", 0.30)
 PPE_CONF_HELMET_THRESHOLD = getattr(config, "PPE_CONF_HELMET_THRESHOLD", 0.30)
 
+PPE_ALERTS_ENABLED = getattr(config, "PPE_ALERTS_ENABLED", True)
+
 
 def is_compliant(hist, presence_threshold=PPE_PRESENCE_THRESHOLD, min_frames=PPE_COMPLIANCE_MIN_FRAMES):
     recent = hist.get("recent")
@@ -31,7 +33,9 @@ def is_compliant(hist, presence_threshold=PPE_PRESENCE_THRESHOLD, min_frames=PPE
             and avg_helmet_conf >= PPE_CONF_HELMET_THRESHOLD
         ):
             return "compliant"
-        return "alert"
+        if PPE_ALERTS_ENABLED:
+            return "alert"
+        return "violation"
     else:
         frames = hist.get("frames", 0)
         if frames < min_frames:
