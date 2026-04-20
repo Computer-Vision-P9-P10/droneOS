@@ -28,6 +28,22 @@ def collect_state_change_events(
         )
         current_frame = hist.get("last_seen_frame", 0)
 
+        recent = hist.get("recent")
+        if recent is not None:
+            frames = len(recent)
+            vest_frames = sum(1 for r in recent if r.get("vest"))
+            helmet_frames = sum(1 for r in recent if r.get("helmet"))
+            avg_vest_conf = sum(r.get("vest_conf", 0.0) for r in recent) / frames if frames > 0 else 0.0
+            avg_helmet_conf = sum(r.get("helmet_conf", 0.0) for r in recent) / frames if frames > 0 else 0.0
+            avg_person_conf = sum(r.get("person_conf", 0.0) for r in recent) / frames if frames > 0 else 0.0
+        else:
+            frames = int(hist.get("frames", 0))
+            vest_frames = int(hist.get("vest_frames", 0))
+            helmet_frames = int(hist.get("helmet_frames", 0))
+            avg_person_conf = float(hist.get("last_person_conf", 0.0))
+            avg_vest_conf = float(hist.get("last_vest_conf", 0.0))
+            avg_helmet_conf = float(hist.get("last_helmet_conf", 0.0))
+
         if fps > 0:
             stable_time_seconds = max(
                 0.0, (current_frame - state_changed_at_frame) / fps
@@ -44,12 +60,12 @@ def collect_state_change_events(
                 "person_id": int(pid),
                 "state": current_state,
                 "stable_time_seconds": stable_time_seconds,
-                "frames": int(hist.get("frames", 0)),
-                "vest_frames": int(hist.get("vest_frames", 0)),
-                "helmet_frames": int(hist.get("helmet_frames", 0)),
-                "person_confidence": float(hist.get("last_person_conf", 0.0)),
-                "vest_confidence": float(hist.get("last_vest_conf", 0.0)),
-                "helmet_confidence": float(hist.get("last_helmet_conf", 0.0)),
+                "frames": int(frames),
+                "vest_frames": int(vest_frames),
+                "helmet_frames": int(helmet_frames),
+                "person_confidence": float(avg_person_conf),
+                "vest_confidence": float(avg_vest_conf),
+                "helmet_confidence": float(avg_helmet_conf),
                 "last_seen_frame": int(hist.get("last_seen_frame", 0)),
                 "last_box": hist.get("last_box"),
             }

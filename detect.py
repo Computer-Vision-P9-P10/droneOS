@@ -1,5 +1,6 @@
 import threading
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -12,7 +13,6 @@ from person_state import cleanup_person_history, get_current_state, is_compliant
 from ppe_matching import best_region_match
 from visualization import compliance_color_from_state, draw_top_left_overlay
 from zoom_controller import ZoomController
-
 
 def _to_numpy(array_like):
     if hasattr(array_like, "cpu"):
@@ -209,12 +209,27 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
                         },
                     )
 
+                    hist.setdefault(
+                        "recent",
+                        deque(maxlen=getattr(config, "PERSON_HISTORY_MAX_FRAMES", 50)),
+                    )
+
                     hist["frames"] += 1
                     hist["last_seen_frame"] = frame_count
                     hist["last_box"] = person_box
                     hist["last_person_conf"] = float(person["conf"])
                     hist["last_vest_conf"] = float(vest_match[4]) if vest_match is not None else 0.0
                     hist["last_helmet_conf"] = float(helmet_match[4]) if helmet_match is not None else 0.0
+
+                    hist["recent"].append(
+                        {
+                            "vest": vest_match is not None,
+                            "helmet": helmet_match is not None,
+                            "vest_conf": hist["last_vest_conf"],
+                            "helmet_conf": hist["last_helmet_conf"],
+                            "person_conf": hist["last_person_conf"],
+                        }
+                    )
 
                     if vest_match is not None:
                         hist["vest_frames"] += 1
@@ -374,7 +389,7 @@ def run_detector(stop_event, on_person_state_change=None, on_frame_summary=None)
 if __name__ == "__main__":
     local_stop = threading.Event()
 
-    def print_state_event(payload):
+    def print_state_event(payload, frame=None):
         print(payload)
 
     try:
