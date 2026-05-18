@@ -1,6 +1,12 @@
-# MODEL_PATH = "yolo12s.pt"
+# MODEL_PATH = "yolo26s-grey.pt"
+# MODEL_PATH = "yolo26s-increased-baseline2.pt"
+# MODEL_PATH = "yolo26s-increased-2x-aug.pt"
+# MODEL_PATH = "yolo26s-3x-grey.pt"
+# MODEL_PATH = "yolo11s.pt"
 MODEL_PATH = "PPE-Drone-Models/3x/yolo26s/best.pt"
+# MODEL_PATH = "PPE-Drone-Models/3x/yolo11s/best.pt"
 # VIDEO_PATH = 0
+# VIDEO_PATH = "./videos/misc/people-walking.mp4" # Compliance example
 VIDEO_PATH = "./videos/new_videos/DJI_0022.mp4" # Compliance example
 # VIDEO_PATH = "./videos/DJI_0017.MP4" # Compliance example
 # VIDEO_PATH = "./videos/DJI_0006.MP4" # Violation example (only in beginning of video)
@@ -8,6 +14,8 @@ VIDEO_PATH = "./videos/new_videos/DJI_0022.mp4" # Compliance example
 # VIDEO_PATH = "./videos/DJI_0019.MP4" # Hardware zoom example
 # VIDEO_PATH = "./videos/DJI_0020.MP4" # Dark hardware zoom example
 # VIDEO_PATH = "./videos/amar/DJI_0018.MP4"
+# VIDEO_PATH = "./videos/amar/DJI_0016.MP4"
+# VIDEO_PATH = "./videos/random_videos/4.mp4" # Compliance example
 BACKEND_HOST = "0.0.0.0"
 
 FILTERS_ON = False
