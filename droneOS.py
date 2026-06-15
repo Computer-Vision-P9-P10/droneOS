@@ -411,7 +411,7 @@ def cv_worker():
         cv_running.clear()
 
 
-def perform_start_telemetry_path():
+def perform_start_telemetry_path(following: bool = True):
     end_lat = getattr(config, "TELEMETRY_PATH_END_LAT", None)
     end_lon = getattr(config, "TELEMETRY_PATH_END_LON", None)
     # try to coerce to floats if provided
@@ -424,7 +424,10 @@ def perform_start_telemetry_path():
         end_lat = end_lon = None
 
     # Apply the two-point path
-    simulator.set_two_point_path(end_lat=end_lat, end_lon=end_lon)
+    if following:
+        simulator.set_path_follow(end_lat=end_lat, end_lon=end_lon)
+    else:
+        simulator.set_path_follow_fail(end_lat=end_lat, end_lon=end_lon)
 
     # Build a small square (2m half-size) around the two-point path and use it as the configured boundary
     # but do NOT switch waypoints to patrol that square (keep two-point path).
@@ -450,7 +453,8 @@ COMMAND_MAP = {
     "STOP_CV": perform_stop_cv,
     "START_TELEMETRY": perform_start_telemetry,
     "STOP_TELEMETRY": perform_stop_telemetry,
-    "START_TELEMETRY_PATH": perform_start_telemetry_path,
+    "START_TELEMETRY_PATH": lambda: perform_start_telemetry_path(following=True),
+    "START_TELEMETRY_PATH_FAIL": lambda: perform_start_telemetry_path(following=False),
 }
 
 

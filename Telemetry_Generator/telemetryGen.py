@@ -2,7 +2,7 @@ import time, math
 from datetime import datetime, timezone
 
 class FlightPathSimulator:
-    def __init__(self, start_lat, start_lon, start_alt=30, speed_mps=30):
+    def __init__(self, start_lat, start_lon, start_alt=30, speed_mps=5):
         self.start_lat = start_lat
         self.start_lon = start_lon
         self.lat = start_lat
@@ -16,10 +16,12 @@ class FlightPathSimulator:
         meters_to_lat = 1 / 111_000
         meters_to_lon = 1 / (111_000 * max(0.1, abs(math.cos(math.radians(start_lat)))))
         forward_100m = 100 * meters_to_lat
+        forward_30m = 30 * meters_to_lat
         left_20m = 20 * meters_to_lon
 
         # save commonly used offsets for later two-point path defaults
         self._forward_100m = forward_100m
+        self._forward_30m = forward_30m
         self._left_20m = left_20m
 
         # Define default "pattern" waypoints
@@ -36,11 +38,26 @@ class FlightPathSimulator:
 
         self.boundary = None
 
-    def set_two_point_path(self, end_lat=None, end_lon=None):
+    def set_path_follow(self, end_lat=None, end_lon=None):
         if end_lat is None or end_lon is None:
             end_lat = self.start_lat + self._forward_100m
             end_lon = self.start_lon
-        self.waypoints = [(self.start_lat, self.start_lon), (float(end_lat), float(end_lon))]
+        self.waypoints = [(self.start_lat, self.start_lon), 
+                          (float(end_lat), float(end_lon))]
+        self.waypoint_index = 0
+        # intentionally do not touch self.boundary
+    
+    def set_path_follow_fail(self, end_lat=None, end_lon=None):
+        if end_lat is None or end_lon is None:
+            end_lat = self.start_lat + self._forward_100m
+            end_lon = self.start_lon + self._left_20m
+        # include the intermediate offset waypoint and the final endpoint
+        self.waypoints = [
+            (self.start_lat, self.start_lon),
+            (self.start_lat + self._forward_30m, self.start_lon),
+            (self.start_lat + self._forward_30m, self.start_lon + self._left_20m),
+            (float(end_lat), float(end_lon)),
+        ]
         self.waypoint_index = 0
         # intentionally do not touch self.boundary
 
