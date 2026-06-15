@@ -289,6 +289,27 @@ def telemetry_worker():
             simulator.update()
             telemetry = simulator.get_telemetry()
         client.publish(TELEMETRY_TOPIC, json.dumps(telemetry), qos=0)
+
+        # Boundary check: if a square boundary has been configured for the simulator,
+        # publish a boundary warning event when the telemetry leaves that area.
+        try:
+            lat = telemetry.get("lat")
+            lon = telemetry.get("lon")
+            if lat is not None and lon is not None and simulator.point_outside_boundary(lat, lon):
+                warning_event = {
+                    "event": "boundary_warning",
+                    "mission_id": current_mission_id,
+                    "warning": "out_of_bounds",
+                    "lat": lat,
+                    "lon": lon,
+                    "timestamp": telemetry.get("timestamp"),
+                    "source": "telemetry_path_boundary",
+                }
+                client.publish(DETECTION_TOPIC, json.dumps(_to_json_safe(warning_event)), qos=1)
+        except Exception as e:
+            # non-fatal; log and continue
+            print(f"Boundary check error: {e}")
+
         time.sleep(1)
 
 
@@ -390,11 +411,46 @@ def cv_worker():
         cv_running.clear()
 
 
+def perform_start_telemetry_path():
+    end_lat = getattr(config, "TELEMETRY_PATH_END_LAT", None)
+    end_lon = getattr(config, "TELEMETRY_PATH_END_LON", None)
+    # try to coerce to floats if provided
+    try:
+        if end_lat is not None:
+            end_lat = float(end_lat)
+        if end_lon is not None:
+            end_lon = float(end_lon)
+    except Exception:
+        end_lat = end_lon = None
+
+    # Apply the two-point path
+    simulator.set_two_point_path(end_lat=end_lat, end_lon=end_lon)
+
+    # Build a small square (2m half-size) around the two-point path and use it as the configured boundary
+    # but do NOT switch waypoints to patrol that square (keep two-point path).
+    boundary_meters = getattr(config, "TELEMETRY_PATH_BOUNDARY_METERS", 2)
+    simulator.set_square_boundary(meters=boundary_meters, end_lat=end_lat, end_lon=end_lon, set_waypoints=False)
+
+    if telemetry_running.is_set():
+        # already running: ensure the simulator picks up the new path and boundary immediately
+        with telemetry_lock:
+            simulator.last_update = time.time()
+        print(f"Telemetry running: switched to two-point path with square boundary ({boundary_meters}m).")
+        return
+
+    # not running: start telemetry (which will use the two-point path we just set)
+    print(f"Starting telemetry on two-point path with square boundary ({boundary_meters}m)...")
+    telemetry_running.set()
+    global telemetry_thread
+    telemetry_thread = threading.Thread(target=telemetry_worker, daemon=True)
+    telemetry_thread.start()
+
 COMMAND_MAP = {
     "START_CV": perform_start_cv,
     "STOP_CV": perform_stop_cv,
     "START_TELEMETRY": perform_start_telemetry,
     "STOP_TELEMETRY": perform_stop_telemetry,
+    "START_TELEMETRY_PATH": perform_start_telemetry_path,
 }
 
 
